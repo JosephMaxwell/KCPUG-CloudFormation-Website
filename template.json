@@ -375,7 +375,7 @@
     "DnsAddress" : {
       "Description" : "Website URL",
       "Value" :  { "Fn::Join" : ["", [
-        "http://", { "Ref" : "DnsPrefix"}, ".", { "Ref" : "DnsRecord" }
+        "http://", { "Ref" : "DnsRecord" }
       ]]}
     }
   }
