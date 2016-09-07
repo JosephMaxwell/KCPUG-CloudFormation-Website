@@ -1,0 +1,382 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Launches a LAMP stack server.",
+
+  "Parameters" : {
+    "InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String",
+      "Default" : "t2.micro",
+      "AllowedValues" : [ "t2.micro"],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+      
+    "SshKey" : {
+      "Description" : "Name of an existing EC2 keypair to enable SSH access to the instances",
+      "Default": "SwiftOtter",
+      "Type" : "AWS::EC2::KeyPair::KeyName"
+    },
+      
+    "DnsPrefix" : {
+      "Description" : "Subdomain for this site (<prefix>.<zone>)",
+      "Type": "String",
+      "Default": "lamp-stack"
+    },
+      
+    "DnsZone" : {
+      "Description" : "Route53-hosted zone to use for the DNS record (<prefix>.<zone>)",
+      "Type": "String",
+      "Default": "swiftotter.com"
+    },
+    
+    "GitRepository" : {
+      "Description" : "Repository to put into the /var/www/html/git directory",
+      "Type": "String",
+      "Default": "https://github.com/JosephMaxwell/KCPUG-CloudFormation-Website"
+    },
+    
+    "DBName" : {
+      "Description" : "Name of MySQL database",
+      "Type": "String",
+      "Default": "kcpugtest"
+    },
+    
+    "MultiAZDatabase" : {
+      "Default": "true",
+      "Description" : "Create a Multi-AZ MySQL Amazon RDS database instance",
+      "Type": "String",
+      "AllowedValues" : [ "true", "false" ],
+      "ConstraintDescription" : "must be either true or false."
+    },
+    
+    "DBUserName" : {
+      "NoEcho": "true",
+      "Default": "kcpugtest",
+      "Description" : "Username for MySQL database access",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "16",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+    },
+    
+    "DBPassword" : {
+      "NoEcho": "true",
+      "Default": "hEyworld111",
+      "Description" : "Password for MySQL database access",
+      "Type": "String",
+      "MinLength": "8",
+      "MaxLength": "41",
+      "AllowedPattern" : "[a-zA-Z0-9]*",
+      "ConstraintDescription" : "must contain only alphanumeric characters."
+    },
+    
+    "DBAllocatedStorage" : {
+      "Description" : "The size of the database (Gb)",
+      "Type": "Number",
+      "Default": "5",
+      "MinValue": "5",
+      "MaxValue": "1024",
+      "ConstraintDescription" : "must be between 5 and 1024Gb."
+    },
+    
+    "DBInstanceClass" : {
+      "Description" : "RDS Database Instance Class",
+      "Type": "String",
+      "Default" : "db.t2.micro",
+      "AllowedValues" : [ "db.t2.micro"],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    }
+  },
+
+  "Mappings" : {
+    "RegionMap" : {
+      "us-east-1" : {
+        "AMI" : "ami-6869aa05"
+      },
+      "us-west-1" : {
+        "AMI" : "ami-7172b611"
+      },
+      "us-west-2" : {
+        "AMI" : "ami-31490d51"
+      },
+      "eu-west-1" : {
+        "AMI" : "ami-f9dd458a"
+      }
+    }
+  },
+
+  "Resources" : {
+    "ServerGroup" : {
+      "Type" : "AWS::AutoScaling::AutoScalingGroup",
+      "Properties" : {
+        "AvailabilityZones" : { "Fn::GetAZs" : "" },
+        "LaunchConfigurationName" : { "Ref" : "LaunchConfig" },
+        "MinSize" : "1",
+        "MaxSize" : "3",
+        "DesiredCapacity" : "2",
+        "LoadBalancerNames" : [ { "Ref" : "ElasticLoadBalancer" } ]
+      },
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT5M",
+          "Count"   : "2"
+        }
+      },
+      "UpdatePolicy": {
+        "AutoScalingRollingUpdate": {
+          "MinInstancesInService": "1",
+          "MaxBatchSize": "1",
+          "PauseTime" : "PT15M",
+          "WaitOnResourceSignals": "true"
+        }
+      }
+    },
+
+    "LaunchConfig" : {
+      "Type" : "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata" : {
+        "AWS::CloudFormation::Init" : {
+          "config" : {
+            "packages": {
+              "rpm": {
+                "epel": "https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm",
+                "webtatic": "https://mirror.webtatic.com/yum/el7/webtatic-release.rpm"
+              },
+              "yum" : {
+                "php70"        : [],
+                "php70-mysqlnd": [],
+                "httpd24"      : [],
+                "git-all"      : []
+              }
+            },
+            "files": {
+              "/var/www/html/index.php": {
+                "content": {
+                   "Fn::Join" : [ "", [
+                    "<html>\n",
+                    "  <head>\n",
+                    "    <title>AWS CloudFormation PHP Sample</title>\n",
+                    "    <meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\">\n",
+                    "  </head>\n",
+                    "  <body>\n",
+                    "    <h1>Welcome to the AWS CloudFormation PHP Sample</h1>\n",
+                    "    <p/>\n",
+                    "    <?php\n",
+                    "      // Print out the current data and tie\n",
+                    "      print \"The Current Date and Time is: <br/>\";\n",
+                    "      print date(\"g:i A l, F j Y.\");\n",
+                    "    ?>\n",
+                    "    <p/>\n",
+                    "    <?php\n",
+                    "      // Setup a handle for CURL\n",
+                    "      $curl_handle=curl_init();\n",
+                    "      curl_setopt($curl_handle,CURLOPT_CONNECTTIMEOUT,2);\n",
+                    "      curl_setopt($curl_handle,CURLOPT_RETURNTRANSFER,1);\n",
+                    "      // Get the hostname of the intance from the instance metadata\n",
+                    "      curl_setopt($curl_handle,CURLOPT_URL,'http://169.254.169.254/latest/meta-data/public-hostname');\n",
+                    "      $hostname = curl_exec($curl_handle);\n",
+                    "      if (empty($hostname))\n",
+                    "      {\n",
+                    "        print \"Sorry, for some reason, we got no hostname back <br />\";\n",
+                    "      }\n",
+                    "      else\n",
+                    "      {\n",
+                    "        print \"Server = \" . $hostname . \"<br />\";\n",
+                    "      }\n",
+                    "      // Get the instance-id of the intance from the instance metadata\n",
+                    "      curl_setopt($curl_handle,CURLOPT_URL,'http://169.254.169.254/latest/meta-data/instance-id');\n",
+                    "      $instanceid = curl_exec($curl_handle);\n",
+                    "      if (empty($instanceid))\n",
+                    "      {\n",
+                    "        print \"Sorry, for some reason, we got no instance id back <br />\";\n",
+                    "      }\n",
+                    "      else\n",
+                    "      {\n",
+                    "        print \"EC2 instance-id = \" . $instanceid . \"<br />\";\n",
+                    "      }\n",
+                    "      $Database   = \"", {"Fn::GetAtt" : ["MySqlDB", "Endpoint.Address"]}, "\";\n",
+                    "      $DBUser     = \"", {"Ref" : "DBUserName"}, "\";\n",
+                    "      $DBPassword = \"", {"Ref" : "DBPassword"}, "\";\n",
+                    "      print \"Database = \" . $Database . \"<br />\";\n",
+                    "      $dbconnection = mysqli_connect($Database, $DBUser, $DBPassword)\n",
+                    "                      or die(\"Could not connect: \" . mysql_error());\n",
+                    "      print (\"Connected to $Database successfully\");\n",
+                    "      mysqli_close($dbconnection);\n",
+                    "    ?>\n",
+                    "    <h2>PHP Information</h2>\n",
+                    "    <p/>\n",
+                    "    <?php\n",
+                    "      phpinfo();\n",
+                    "    ?>\n",
+                    "  </body>\n",
+                    "</html>\n"
+                  ]]
+                },
+                "mode": "000600",
+                "owner": "apache",
+                "group": "apache"
+              },
+              "/etc/cfn/cfn-hup.conf": {
+                "content": {
+                   "Fn::Join" : [ "", [
+                    "[main]\n",
+                    "stack=", {"Ref": "AWS::StackId" }, "\n",
+                    "region=", {"Ref": "AWS::Region" }, "\n"
+                  ]],
+                  "mode": "000400",
+                  "owner": "root",
+                  "group": "root"
+                }
+              },
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                "content": {
+                  "Fn::Join" : ["", [
+                    "[cfn-auto-reloader-hook]\n",
+                    "triggers=post.update\n",
+                    "path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init\n",
+                    "action=/opt/aws/bin/cfn-init -v ",
+                    "         --stack ", { "Ref" : "AWS::StackName" },
+                    "         --resource LaunchConfig ",
+                    "         --region ", { "Ref" : "AWS::Region" }, "\n",
+                    "runas=root\n"
+                  ]]
+                }
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "httpd": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"]
+                }
+              }
+            }
+          }
+        }
+      },
+            
+      "Properties" : {
+        "KeyName" : { "Ref" : "SshKey" },
+        "ImageId" : { "Fn::FindInMap" : [ "RegionMap", { "Ref" : "AWS::Region" }, "AMI"] },
+        "SecurityGroups" : [ { "Ref" : "WebServerSecurityGroup" } ],
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#!/bin/bash -xe\n",
+          
+          "yum update -y aws-cfn-bootstrap",
+          
+          "# Helper function\n",
+          "function error_exit\n",
+          "{\n",
+          "  cfn-signal -e 1 -r \"$1\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "  exit 1\n",
+          "}\n",
+
+          "/opt/aws/bin/cfn-init ",
+          "    --stack ", { "Ref" : "AWS::StackName" },
+          "    --resource LaunchConfig",
+          "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-init'\n",
+
+          "# All is well, signal success\n",
+          "/opt/aws/bin/cfn-signal -e $? ",
+          "    --stack ", { "Ref": "AWS::StackName" },
+          "    --resource ServerGroup ",
+          "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-signal'\n",
+          
+          "(cd /var/www/html && git clone ", { "Ref": "GitRepository" }, " git)\n",
+          "chown apache:apache /var/www/html/git",
+
+          "#EOF"
+        ]]}}
+      }
+    },
+
+    "WebServerSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Enable HTTP access via port 80 locked down to the ELB and SSH access",
+        "SecurityGroupIngress" : [
+          {"IpProtocol" : "tcp", "FromPort" : "80", "ToPort" : "80", "SourceSecurityGroupOwnerId" : {"Fn::GetAtt" : ["ElasticLoadBalancer", "SourceSecurityGroup.OwnerAlias"]},"SourceSecurityGroupName" : {"Fn::GetAtt" : ["ElasticLoadBalancer", "SourceSecurityGroup.GroupName"]}},
+          {"IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : "0.0.0.0/0"}
+        ]
+      }
+    },
+
+    "DBSecurityGroup" : {
+      "Type": "AWS::RDS::DBSecurityGroup",
+      "Properties": {
+        "DBSecurityGroupIngress": {
+          "EC2SecurityGroupName": { "Ref": "WebServerSecurityGroup" }
+        },
+        "GroupDescription": "database access"
+      }
+    },
+
+    "ElasticLoadBalancer" : {
+      "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+      "Properties" : {
+        "CrossZone": "true",
+        "AvailabilityZones" : { "Fn::GetAZs" : "" },
+        "LBCookieStickinessPolicy" : [ {
+          "PolicyName" : "CookieBasedPolicy",
+          "CookieExpirationPeriod" : "30"
+        } ],
+        "Listeners" : [ {
+          "LoadBalancerPort" : "80",
+          "InstancePort" : "80",
+          "Protocol" : "HTTP",
+          "PolicyNames" : [ "CookieBasedPolicy" ]
+        } ],
+        "HealthCheck" : {
+          "Target" : "HTTP:80/",
+          "HealthyThreshold" : "2",
+          "UnhealthyThreshold" : "5",
+          "Interval" : "10",
+          "Timeout" : "5"
+        }
+      }
+    },
+
+    "DnsRecord" : {
+      "Type" : "AWS::Route53::RecordSet",
+      "Properties" : {
+        "HostedZoneName" : { "Fn::Join" : [ "", [{"Ref" : "DnsZone"}, "." ]]},
+        "Comment" : "Sample LAMP Stack Website",
+        "Name" : { "Fn::Join" : [ "", [{"Ref" : "DnsPrefix"}, ".", {"Ref" : "DnsZone"}, "."]]},
+        "Type" : "CNAME",
+        "TTL" : "900",
+        "ResourceRecords" : [ { "Fn::GetAtt" : [ "ElasticLoadBalancer", "DNSName" ] } ]
+      }
+    },
+
+    "WaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    },
+    
+    "MySqlDB": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "Engine": "MySQL",
+        "DBName" : { "Ref": "DBName" },
+        "MultiAZ" : { "Ref": "MultiAZDatabase" },
+        "MasterUsername": { "Ref": "DBUserName" },
+        "MasterUserPassword": { "Ref": "DBPassword" },
+        "DBInstanceClass": { "Ref": "DBInstanceClass" },
+        "AllocatedStorage": { "Ref": "DBAllocatedStorage" },
+        "DBSecurityGroups": [ { "Ref": "DBSecurityGroup" } ]
+      }
+    }
+  },
+
+  "Outputs" : {
+    "DnsAddress" : {
+      "Description" : "Website URL",
+      "Value" :  { "Fn::Join" : ["", [
+        "http://", { "Ref" : "DnsPrefix"}, ".", { "Ref" : "DnsRecord" }
+      ]]}
+    }
+  }
+}
