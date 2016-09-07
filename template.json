@@ -287,7 +287,7 @@
           "    --region ", { "Ref" : "AWS::Region" }, " || error_exit 'Failed to run cfn-signal'\n",
           
           "(cd /var/www/html && git clone ", { "Ref": "GitRepository" }, " git)\n",
-          "chown apache:apache /var/www/html/git",
+          "chown apache:apache /var/www/html/git\n",
 
           "#EOF"
         ]]}}
